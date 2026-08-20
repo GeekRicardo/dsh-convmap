@@ -7,6 +7,7 @@ DeepSeek Harness web 插件：**对话地图**。在主对话区**左缘垂直�
 ## 功能
 
 - **全量轮次刻度**：host 侧直读会话完整日志，刻度覆盖当前对话**所有**用户轮次（不受客户端分页窗口限制），不再只有最近一两对；轮次多时刻度区自身可滚动，上下有渐变遮罩。
+- **先画后补（长会话不空等）**：刻度先用**已渲染的轮次**立刻画出来，host 的全量结果回来后再合并——历史在前，本地还没落盘的新轮次接在后面。长会话第一次要等 host 折一遍日志，这期间刻度不是空的。
 - **Hover 梯度展开**：鼠标划过刻度区，邻近刻度按距离梯度展开（1 / 0.68 / 0.44 / 0.25 宽度），右侧浮出预览卡：该轮提问摘要 + 该轮最后一次回复摘要。
 - **点击跳转**：刻度按下即滚动对话到对应轮次；点击尚未渲染的老轮次时，自动逐页「加载更早」直到目标行出现再跳转（加载中该刻度脉冲闪烁）。
 - **滚动高亮**：滚动对话时，当前可视轮次的刻度自动加粗高亮并保持在刻度区可视范围。
@@ -52,19 +53,30 @@ pm2 restart dsh-web   # 若用 pm2 托管；否则用你的启动方式重启
 
 | 半区 | 职责 |
 | --- | --- |
-| Host | 注册同源路由 `GET /dsh-convmap/turns?sessionId=…`（loopback + 同源守卫）：经 `sessionQuery.readSession` 读**全量**会话事件（含未渲染历史），提取所有轮次 `{ key, prompt, response, seq }`；key 按引擎的 `conversationContextKey(kind, id)` 规则重建为 `13:input-message<messageId>`（`13` = `"input-message".length`），与客户端 DOM 锚点一一对应；提问/回复摘要在 host 侧就截到 100 / 240 字 |
-| Client | 在 `conversation.input.overlay` 槽位（list 槽、会话作用域）挂刻度组件；靠 `data-conversation-scroll` 定位对话滚动容器、`data-chat-anchor-key` 定位目标行；未渲染的老轮次经 `sessions.binding(sessionId).session.loadOlder()` 逐页加载后再跳转（上限 60 页） |
+| Host | 注册同源路由 `GET /dsh-convmap/turns?sessionId=…`（loopback + 同源守卫）：经 `sessionPersistence.readRaw` 读**原始日志文本**（含未渲染历史）按行折出所有轮次 `{ key, prompt, response, seq }`；key 按引擎的 `conversationContextKey(kind, id)` 规则重建为 `13:input-message<messageId>`（`13` = `"input-message".length`），与客户端 DOM 锚点一一对应；提问/回复摘要在 host 侧就截到 100 / 240 字 |
+| Client | 在 `conversation.input.overlay` 槽位（list 槽、会话作用域）挂刻度组件；刻度 = 已渲染轮次（`useSession` 的 chat 快照）与 host 全量轮次的合并；靠 `data-conversation-scroll` 定位对话滚动容器、`data-chat-anchor-key` 定位目标行；未渲染的老轮次经 `sessions.binding(sessionId).session.loadOlder()` 逐页加载后再跳转（上限 60 页） |
+
+### 长会话为什么不再卡（实测）
+
+最初 host 走 `sessionQuery.readSession`，它把整条日志喂给 `Session.create` 做**全量重放校验**——那是恢复会话用的路径，画刻度根本不需要。一条 2.4 MB / 5998 帧 / 8004 行的真实日志上：
+
+| 读法 | 冷启 | 命中缓存 |
+| --- | --- | --- |
+| `sessionQuery.readSession`（重放校验） | **33 s** | — |
+| `sessionPersistence.readRaw` + 折行 | **1.1 s**（其中解压 0.5 s、折行 0.12 s） | **0.02–0.12 s** |
+
+缓存键是 `readStoredRevision`——它只 stat 不读字节，日志又是 append-only，所以没变就直接返回上次折好的结果。这套「revision 当缓存键 + 只折需要的行 + 先渲染已有的再补全量」是照着 Orca 扫描 transcript 的做法搬的：它对每个会话文件按 `dev:ino:birthtime` 记身份、按字节偏移增量续读、把解析结果持久化复用（其 issue #9210 记录的冷扫是 6.7 GB / 109 s）。
 
 ### 契约说明（对照 dsh 引擎）
 
 - 刻度 key 与 DOM 锚点 key 同源（同一拼接规则），保证「点击 → 滚动到行」精确对应。
 - host 提取判定与客户端渲染判定一致（`source.kind === 'user'` + `surfaceOp === 'append'`），避免出现客户端不渲染的幽灵刻度。
-- 只消费 host 服务（`webServer` / `sessionQuery`）、不发布服务，`cordis.patch.yml` 不包 isolate realm，卸载即完全还原。
+- 只消费 host 服务（`webServer` / `sessionPersistence`，回退时 `sessionQuery`）、不发布服务，`cordis.patch.yml` 不包 isolate realm，卸载即完全还原。
 
 ## 开发
 
 ```bash
-node --test test/*.test.mjs     # host 侧 buildTurns 的契约测试
+node --test test/*.test.mjs     # host 侧折轮次的契约测试（事件数组 + 原始日志两条路径）
 node scripts/build-dynamic.mjs  # 生成 lib/client.dynamic.js（动态插件形态）
 ```
 

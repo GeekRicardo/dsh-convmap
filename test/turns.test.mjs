@@ -71,3 +71,22 @@ test('损坏或缺失的事件流不抛错', () => {
   assert.deepEqual(buildTurns(undefined), [])
   assert.deepEqual(buildTurns([null, {}, { type: 'user/message', surfaceOp: 'append' }]), [])
 })
+
+// 快路径：直接折原始日志文本，结果必须与折事件数组一致。
+test('buildTurnsFromLog 与 buildTurns 折出同样的轮次', async () => {
+  const { buildTurnsFromLog } = await import('../lib/index.js')
+  const events = [
+    userMessage(1, 'a', '第一问'),
+    { seq: 2, type: 'text-chunks', surfaceOp: 'append', data: { runs: ['忽略我'] } },
+    assistantMessage(3, '第一答'),
+    userMessage(4, 'b', '第二问'),
+  ]
+  const log = events.map(e => JSON.stringify(e)).join('\n') + '\n'
+  assert.deepEqual(buildTurnsFromLog(log), buildTurns(events))
+})
+
+test('buildTurnsFromLog 忽略撕裂的尾行', async () => {
+  const { buildTurnsFromLog } = await import('../lib/index.js')
+  const log = JSON.stringify(userMessage(1, 'a', '完整')) + '\n' + '{"type":"user/message","sur'
+  assert.deepEqual(buildTurnsFromLog(log).map(t => t.prompt), ['完整'])
+})
