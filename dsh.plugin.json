@@ -1,7 +1,7 @@
 {
   "name": "dsh-convmap",
   "description": "对话地图：主对话区左缘的一列可交互刻度，覆盖会话全部用户轮次，hover 预览、点击跳转、滚动高亮",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "entry": {
     "name": "dsh-convmap",
     "inject": []
