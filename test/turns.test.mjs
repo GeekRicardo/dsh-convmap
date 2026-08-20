@@ -90,3 +90,43 @@ test('buildTurnsFromLog 忽略撕裂的尾行', async () => {
   const log = JSON.stringify(userMessage(1, 'a', '完整')) + '\n' + '{"type":"user/message","sur'
   assert.deepEqual(buildTurnsFromLog(log).map(t => t.prompt), ['完整'])
 })
+
+// 代理自跑的会话：整轮没有人发言时，用该轮第一条注入消息当刻度。
+const turnStart = (seq, turn) => ({ seq, type: 'turn/start', data: { turn } })
+const injected = (seq, id, text, plugin = 'cordis-host-runner') => ({
+  seq,
+  type: 'user/message',
+  surfaceOp: 'append',
+  data: { id, source: { kind: 'plugin', plugin }, content: [{ type: 'text', text }] },
+})
+
+test('整轮没有人发言时，注入消息顶上一条刻度（每轮只留第一条）', () => {
+  const turns = buildTurns([
+    turnStart(1, 1),
+    injected(2, 'n1', '审批策略从 never 变成 ask'),
+    injected(3, 'n2', 'Cordis run 完成'),
+    assistantMessage(4, '好的'),
+    turnStart(5, 2),
+    injected(6, 'n3', '又一条通知'),
+  ])
+  assert.deepEqual(turns.map(t => [t.key, t.prompt, t.response]), [
+    ['13:input-messagen1', '审批策略从 never 变成 ask', '好的'],
+    ['13:input-messagen3', '又一条通知', ''],
+  ])
+})
+
+test('轮里有人发言时，同轮的注入消息不占刻度', () => {
+  const turns = buildTurns([
+    turnStart(1, 1),
+    injected(2, 'sys', '<system-reminder>技能目录…'),
+    userMessage(3, 'me', '真提问'),
+    assistantMessage(4, '答'),
+  ])
+  assert.deepEqual(turns.map(t => t.prompt), ['真提问'])
+})
+
+test('注入刻度也从原始日志路径折得出来（turn/start 行不能被筛掉）', async () => {
+  const { buildTurnsFromLog } = await import('../lib/index.js')
+  const events = [turnStart(1, 1), injected(2, 'n1', '通知'), assistantMessage(3, '答')]
+  assert.deepEqual(buildTurnsFromLog(events.map(e => JSON.stringify(e)).join('\n')), buildTurns(events))
+})
