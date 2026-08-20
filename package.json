@@ -1,6 +1,6 @@
 {
   "name": "dsh-convmap",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "DeepSeek Harness web 插件：在主对话区左缘中部渲染「对话地图」刻度（每条 = 一轮用户提问），hover 梯度展开并预览该轮提问/回复摘要，点击跳转（未渲染的老轮次自动分页加载后再跳），滚动时当前轮次自动高亮。",
   "type": "module",
   "main": "lib/index.js",

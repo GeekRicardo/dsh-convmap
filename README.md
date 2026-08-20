@@ -10,10 +10,11 @@ DeepSeek Harness web 插件：**对话地图**。在主对话区**左缘垂直�
 - **代理自跑的轮次也有刻度**：一轮里只要有你发的消息，就只给你的消息立刻度；**整轮没有人发言**的轮次（插件注入的通知起的头，例如审批策略变更、`Cordis run … completed`）留该轮第一条注入消息当刻度——否则这类会话整条地图会是空的。
 - **先画后补（长会话不空等）**：刻度先用**已渲染的轮次**立刻画出来，host 的全量结果回来后再合并——历史在前，本地还没落盘的新轮次接在后面。长会话第一次要等 host 折一遍日志，这期间刻度不是空的。
 - **Hover 梯度展开**：鼠标划过刻度区，邻近刻度按距离梯度展开（1 / 0.68 / 0.44 / 0.25 宽度），右侧浮出预览卡：该轮提问摘要 + 该轮最后一次回复摘要。
+- **预览卡可停可滚**：卡片 420×最高 320 px；鼠标移出刻度后**还留 0.5 秒**，够把鼠标挪进卡里接住它。进卡后提问标题钉在顶部，回复正文可滚轮下滑看完整段，滚动不外溢到对话。预览量有上限——host 侧把提问截到 200 字、回复截到 800 字，滚到底就是这么多（要改就改 `lib/index.js` 的 `PROMPT_LIMIT` / `RESPONSE_LIMIT`）。
 - **点击跳转**：刻度按下即滚动对话到对应轮次；点击尚未渲染的老轮次时，自动逐页「加载更早」直到目标行出现再跳转（加载中该刻度脉冲闪烁）。
 - **滚动高亮**：滚动对话时，当前可视轮次的刻度自动加粗高亮并保持在刻度区可视范围。
 - **键盘可达**：Tab 聚焦后 ↑/↓/Home/End 移动，Enter 跳转。
-- **无干扰**：刻度区不拦截周边交互；≥2 轮用户消息、内容溢出且对话区宽度足够时才显示；被 compaction 折叠进摘要的远古轮次没有可视行可跳时，跳转静默无效（预期行为）。
+- **无干扰**：刻度区不拦截周边交互（预览卡显示期间会接收鼠标事件，这是为了能滚它；卡一收起就完全不挡）；≥2 轮用户消息、内容溢出且对话区宽度足够时才显示；被 compaction 折叠进摘要的远古轮次没有可视行可跳时，跳转静默无效（预期行为）。
 
 ## 一键安装
 
@@ -54,7 +55,7 @@ pm2 restart dsh-web   # 若用 pm2 托管；否则用你的启动方式重启
 
 | 半区 | 职责 |
 | --- | --- |
-| Host | 注册同源路由 `GET /dsh-convmap/turns?sessionId=…`（loopback + 同源守卫）：经 `sessionPersistence.readRaw` 读**原始日志文本**（含未渲染历史）按行折出所有轮次 `{ key, prompt, response, seq }`；key 按引擎的 `conversationContextKey(kind, id)` 规则重建为 `13:input-message<messageId>`（`13` = `"input-message".length`），与客户端 DOM 锚点一一对应；提问/回复摘要在 host 侧就截到 100 / 240 字 |
+| Host | 注册同源路由 `GET /dsh-convmap/turns?sessionId=…`（loopback + 同源守卫）：经 `sessionPersistence.readRaw` 读**原始日志文本**（含未渲染历史）按行折出所有轮次 `{ key, prompt, response, seq }`；key 按引擎的 `conversationContextKey(kind, id)` 规则重建为 `13:input-message<messageId>`（`13` = `"input-message".length`），与客户端 DOM 锚点一一对应；提问/回复摘要在 host 侧就截到 200 / 800 字（`PROMPT_LIMIT` / `RESPONSE_LIMIT`，即预览的上限）|
 | Client | 在 `conversation.input.overlay` 槽位（list 槽、会话作用域）挂刻度组件；刻度 = 已渲染轮次（`useSession` 的 chat 快照）与 host 全量轮次的合并；靠 `data-conversation-scroll` 定位对话滚动容器、`data-chat-anchor-key` 定位目标行；未渲染的老轮次经 `sessions.binding(sessionId).session.loadOlder()` 逐页加载后再跳转（上限 60 页） |
 
 ### 长会话为什么不再卡（实测）
