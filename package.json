@@ -1,7 +1,7 @@
 {
   "name": "dsh-convmap",
-  "version": "1.0.0",
-  "description": "DeepSeek Harness web 插件：在主对话区左缘中间渲染「对话地图」刻度（每条 = 一轮用户提问），hover 梯度展开并预览该轮提问/回复摘要，点击跳转到对应轮次，滚动时当前轮次自动高亮。host 侧直读会话全量日志，老轮次跨页自动加载后跳转。",
+  "version": "1.1.0",
+  "description": "DeepSeek Harness web 插件：在主对话区左缘中部渲染「对话地图」刻度（每条 = 一轮用户提问），hover 梯度展开并预览该轮提问/回复摘要，点击跳转（未渲染的老轮次自动分页加载后再跳），滚动时当前轮次自动高亮。",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
@@ -24,7 +24,6 @@
   "files": [
     "lib/index.js",
     "lib/client.js",
-    "test",
     "cordis.patch.yml",
     "dsh.plugin.json",
     "README.md",
@@ -32,7 +31,8 @@
     "install.sh"
   ],
   "scripts": {
-    "test": "node --test test/*.test.mjs"
+    "test": "node --test test/*.test.mjs",
+    "build:dynamic": "node scripts/build-dynamic.mjs"
   },
   "license": "MIT",
   "engines": {

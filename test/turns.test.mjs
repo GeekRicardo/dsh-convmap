@@ -1,44 +1,73 @@
-import { test } from "node:test";
-import assert from "node:assert/strict";
-import { buildTurns, textOf } from "../lib/index.js";
+// buildTurns 的契约：只认 append 的用户消息，key 与客户端锚点同规则，
+// 回复取该轮最后一条非空 assistant/message。
+import assert from 'node:assert/strict'
+import { test } from 'node:test'
+import { buildTurns, chatAnchorKey, snippet, textOfContent } from '../lib/index.js'
 
-test("buildTurns 提取用户轮次，key 按引擎规则重建", () => {
-  const events = [
-    { type: "user/message", seq: 1, data: { id: "m1", role: "user", source: { kind: "user" }, content: [{ type: "text", text: " 第一轮提问 " }] } },
-    { type: "assistant/message", seq: 2, data: { id: "a1", role: "assistant", source: { kind: "model" }, content: [{ type: "text", text: "第一轮回复" }] } },
-    { type: "assistant/message", seq: 3, data: { id: "a2", role: "assistant", source: { kind: "model" }, content: [{ type: "text", text: "第一轮补充回复" }] } },
-    { type: "user/message", seq: 4, data: { id: "m2", role: "user", source: { kind: "user" }, content: [{ type: "text", text: "第二轮提问" }] } },
-    { type: "assistant/message", seq: 5, data: { id: "a3", role: "assistant", source: { kind: "model" }, content: [{ type: "text", text: "第二轮回复" }] } },
-  ];
-  assert.deepEqual(buildTurns(events), [
-    { key: "13:input-messagem1", prompt: "第一轮提问", response: "第一轮补充回复" },
-    { key: "13:input-messagem2", prompt: "第二轮提问", response: "第二轮回复" },
-  ]);
-});
+const userMessage = (seq, id, text, extra = {}) => ({
+  seq,
+  type: 'user/message',
+  surfaceOp: 'append',
+  data: { id, source: { kind: 'user' }, content: [{ type: 'text', text }], ...extra },
+})
 
-test("buildTurns 忽略非 user source / 无 id / 无文本的比例外节点", () => {
-  const events = [
-    { type: "user/message", seq: 1, data: { id: "m1", role: "user", source: { kind: "user" }, content: [{ type: "text", text: "提问" }] } },
-    // tool / 系统 / 无 id 的用户事件不进刻度
-    { type: "user/message", seq: 2, data: { id: "m2", role: "user", source: { kind: "plugin" }, content: [{ type: "text", text: "插件注入" }] } },
-    { type: "user/message", seq: 3, data: { role: "user", source: { kind: "user" }, content: [{ type: "text", text: "无 id" }] } },
-    { type: "user/message", seq: 4, data: { id: "m4", role: "user", source: { kind: "user" }, content: [{ type: "image" }] } },
-    // 折叠进摘要、但文本为空的远古轮次（无 text 块）不进刻度
-    { type: "user/message", seq: 5, data: { id: "m5", role: "user", source: { kind: "user" }, content: [{ type: "image" }] } },
-    // 有文本的折叠轮次（客户端不渲染，但 host 全量仍覆盖）仍进刻度
-    { type: "user/message", seq: 6, data: { id: "m6", role: "user", source: { kind: "user" }, content: [{ type: "text", text: "折叠轮次" }] } },
-  ];
-  const turns = buildTurns(events);
-  assert.equal(turns.length, 2);
-  assert.deepEqual(turns.map((t) => t.key), ["13:input-messagem1", "13:input-messagem6"]);
-  assert.equal(turns[1].response, "");
-});
+const assistantMessage = (seq, text) => ({
+  seq,
+  type: 'assistant/message',
+  surfaceOp: 'append',
+  data: { message: { content: [{ type: 'text', text }] } },
+})
 
-test("textOf 只拼 text 块", () => {
-  assert.equal(
-    textOf({ content: [{ type: "reasoning", text: "思考" }, { type: "text", text: "A" }, { type: "text", text: "B" }] }),
-    "AB",
-  );
-  assert.equal(textOf({ content: [] }), "");
-  assert.equal(textOf(null), "");
-});
+test('chatAnchorKey 复刻引擎的 conversationContextKey 规则', () => {
+  assert.equal(chatAnchorKey('m1'), '13:input-messagem1')
+  assert.equal(chatAnchorKey(7), '13:input-message7')
+})
+
+test('每条用户消息一条刻度，回复取该轮最后一条非空回复', () => {
+  const turns = buildTurns([
+    userMessage(1, 'a', '第一问'),
+    assistantMessage(2, '第一答上半'),
+    assistantMessage(3, '第一答下半'),
+    userMessage(4, 'b', '第二问'),
+    assistantMessage(5, '第二答'),
+  ])
+  assert.deepEqual(turns.map(t => [t.key, t.prompt, t.response, t.seq]), [
+    ['13:input-messagea', '第一问', '第一答下半', 1],
+    ['13:input-messageb', '第二问', '第二答', 4],
+  ])
+})
+
+test('非 append 事件与非用户来源的消息都不成刻度', () => {
+  const turns = buildTurns([
+    { ...userMessage(1, 'compact', '压缩检查点'), surfaceOp: { op: 'replace', start: 0, end: 1 } },
+    { ...userMessage(2, 'ctx', '注入的上下文'), data: { id: 'ctx', source: { kind: 'plugin', plugin: 'x' }, content: [] } },
+    userMessage(3, 'real', '真提问'),
+  ])
+  assert.deepEqual(turns.map(t => t.key), ['13:input-messagereal'])
+})
+
+test('没有文本块的用户消息仍占一条刻度', () => {
+  const [turn] = buildTurns([{
+    seq: 1,
+    type: 'user/message',
+    surfaceOp: 'append',
+    data: { id: 'img', source: { kind: 'user' }, content: [{ type: 'image', attachment: {} }] },
+  }])
+  assert.equal(turn.prompt, '(空消息)')
+})
+
+test('回复先于任何用户消息时被丢弃，不会写到不存在的轮次上', () => {
+  assert.deepEqual(buildTurns([assistantMessage(1, '孤儿回复')]), [])
+})
+
+test('摘要折叠空白并按字符截断', () => {
+  assert.equal(snippet('  多行\n  文本  ', 100), '多行 文本')
+  assert.equal(snippet('abcdef', 3), 'abc…')
+  assert.equal(textOfContent([{ type: 'text', text: 'a' }, { type: 'image' }, { type: 'text', text: 'b' }]), 'a\nb')
+  assert.equal(textOfContent('不是数组'), '')
+})
+
+test('损坏或缺失的事件流不抛错', () => {
+  assert.deepEqual(buildTurns(undefined), [])
+  assert.deepEqual(buildTurns([null, {}, { type: 'user/message', surfaceOp: 'append' }]), [])
+})

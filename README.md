@@ -2,7 +2,7 @@
 
 DeepSeek Harness web 插件：**对话地图**。在主对话区**左缘垂直居中**渲染一列刻度，每条刻度对应当前会话的一轮用户提问——悬停按距离梯度展开并预览该轮提问/回复摘要，点击跳转到对应轮次，滚动对话时当前轮次刻度自动高亮跟随。
 
-基于之前动态验证（`pkg-1`→`pkg-3`）固化的正式 bundle，重启后自动挂载。
+由动态插件形态（`msgmap-1` 的 `pkg-1`→`pkg-3`，逐轮调过的那版）逐字固化而来的正式 bundle，装好重启即自动挂载。
 
 ## 功能
 
@@ -52,14 +52,36 @@ pm2 restart dsh-web   # 若用 pm2 托管；否则用你的启动方式重启
 
 | 半区 | 职责 |
 | --- | --- |
-| Host | 注册 harness 命令 `turns`：经 `sessionQuery.readSession` 读**全量**会话事件（含未渲染历史），按「用户消息事件」提取所有轮次 `{ key, prompt, response }`，key 按引擎规则重建（`<turn>:input-message<messageId>`），与客户端 DOM 锚点一一对应 |
-| Client | 在 `conversation.input.overlay` 槽位附加式挂载刻度组件；读取款式锚点 `data-chat-anchor-key` / `data-conversation-scroll` 做滚动定位与跳转；未渲染的老轮次经 `sessions.binding(sessionId).session.loadOlder()` 逐页加载后再跳转 |
+| Host | 注册同源路由 `GET /dsh-convmap/turns?sessionId=…`（loopback + 同源守卫）：经 `sessionQuery.readSession` 读**全量**会话事件（含未渲染历史），提取所有轮次 `{ key, prompt, response, seq }`；key 按引擎的 `conversationContextKey(kind, id)` 规则重建为 `13:input-message<messageId>`（`13` = `"input-message".length`），与客户端 DOM 锚点一一对应；提问/回复摘要在 host 侧就截到 100 / 240 字 |
+| Client | 在 `conversation.input.overlay` 槽位（list 槽、会话作用域）挂刻度组件；靠 `data-conversation-scroll` 定位对话滚动容器、`data-chat-anchor-key` 定位目标行；未渲染的老轮次经 `sessions.binding(sessionId).session.loadOlder()` 逐页加载后再跳转（上限 60 页） |
 
 ### 契约说明（对照 dsh 引擎）
 
 - 刻度 key 与 DOM 锚点 key 同源（同一拼接规则），保证「点击 → 滚动到行」精确对应。
 - host 提取判定与客户端渲染判定一致（`source.kind === 'user'` + `surfaceOp === 'append'`），避免出现客户端不渲染的幽灵刻度。
-- 只消费 host 服务、不发布服务，`cordis.patch.yml` 不包 isolate realm，卸载即完全还原。
+- 只消费 host 服务（`webServer` / `sessionQuery`）、不发布服务，`cordis.patch.yml` 不包 isolate realm，卸载即完全还原。
+
+## 开发
+
+```bash
+node --test test/*.test.mjs     # host 侧 buildTurns 的契约测试
+node scripts/build-dynamic.mjs  # 生成 lib/client.dynamic.js（动态插件形态）
+```
+
+渲染逻辑只有一份，在 `lib/client.js` 的「共享本体」区间里。要在运行中的 DSH 里热改这个插件，
+就跑一次 `build-dynamic`，把 `lib/client.dynamic.js` 贴进 `cordis_define` 的 `code.client`
+（host 半边把 `lib/index.js` 的 `buildTurns` 挂到 `harness.handle("turns")` 上），
+调好后改回 `lib/client.js` 再生成一次。两种形态的差别只有三处环境接线：
+
+| 接线 | bundle | 动态插件 |
+| --- | --- | --- |
+| 样式 | `document.head` 常驻 `<style id="dsh-convmap-style">` | `styles.insert(CSS_TEXT)` |
+| 取轮次 | `fetch("/dsh-convmap/turns?sessionId=…")` | `host.call("turns", { sessionId })` |
+| 取服务 | `ctx.slots` / `ctx.sessions` | `ctx.get("slots")` / `ctx.get("sessions")` |
+
+> 装了正式 bundle 之后，记得在原来定义动态插件的那个会话里 `dsh_plugin_undefine`（或删除该动态包）：
+> 动态定义持久在会话日志里，重启会随会话复活，两份实现会同时抢 `conversation.input.overlay` 的
+> `dsh-convmap` 这个 id。
 
 ## 许可
 
