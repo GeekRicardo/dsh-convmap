@@ -1,0 +1,8 @@
+# dsh-convmap bundle patch
+#
+# 安装后（dependencies + dsh.profile.bundles 均含 dsh-convmap），
+# 启动时 profile boot 会合并本 patch，把插件行插入 host composition。
+# 插件只消费 host 服务（sessionQuery / harness 命令），不发布服务，因此不包 isolate realm。
+- insert:
+    - id: dsh-convmap
+      name: 'dsh-convmap'
