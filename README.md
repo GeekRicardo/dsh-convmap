@@ -46,6 +46,16 @@ pm2 restart dsh-web   # 若用 pm2 托管；否则用你的启动方式重启
 ## 卸载
 
 ```bash
+bash install.sh --uninstall            # 加 --dry-run 可先看要做什么
+```
+
+它与安装完全对称：从 `~/.dsh/profiles/web/package.json` 的 `dependencies` 与
+`dsh.profile.bundles` 里摘掉 `dsh-convmap`，再 `pnpm install`，最后校验确实摘干净。
+加 `--restart` 可顺带重启 pm2 托管的 dsh-web。
+
+手工卸载（等价步骤）：
+
+```bash
 # 1. 从 ~/.dsh/profiles/web/package.json 的 dsh.profile.bundles 移除 "dsh-convmap"
 # 2. 移除 dependencies 里的 "dsh-convmap"
 # 3. cd ~/.dsh/profiles/web && pnpm install
